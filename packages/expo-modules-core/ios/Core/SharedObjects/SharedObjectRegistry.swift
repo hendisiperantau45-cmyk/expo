@@ -130,24 +130,39 @@ public final class SharedObjectRegistry: Sendable {
     // Attach the C++ shared-object native state. Because `expo::SharedObject::NativeState`
     // inherits from `expo::EventEmitter::NativeState`, later `addListener` calls see an
     // existing native state (via the inheritance check) and don't overwrite it.
-    let releaser: ObjectReleaser = { [weak self] id in
-      self?.delete(id)
-    }
-    let nativeState = SharedObjectNativeState(native: nativeObject) { context, deallocator in
-      return SharedObjectUtils.makeSharedObjectNativeStatePtr(
-        objectId: id,
-        releaser: releaser,
-        context: context,
-        contextDeallocator: deallocator
-      )
-    }
+    //
+    // A native object may already carry a native state from a previous pairing in another runtime.
+    // Reuse it so all runtimes share one native state (and one underlying C++ pointee, via
+    // `acquireShared`); a fresh state per runtime would leave `nativeObject.nativeState` pointing at
+    // whichever ran last and lose the earlier runtimes' pairings.
+    let nativeState = nativeObject.nativeState ?? {
+      let releaser: ObjectReleaser = { [weak self] id in
+        self?.delete(id)
+      }
+      let state = SharedObjectNativeState(native: nativeObject) { context, deallocator in
+        return SharedObjectUtils.makeSharedObjectNativeStatePtr(
+          objectId: id,
+          releaser: releaser,
+          context: context,
+          contextDeallocator: deallocator
+        )
+      }
+      nativeObject.nativeState = state
+      return state
+    }()
+
     // setNativeState calls acquireShared() synchronously, which retains `nativeState`
     // via Unmanaged.passRetained. That's the wrapper's only strong reference — once
-    // the C++ pointee dies, the contextDeallocator releases it. The local going out
-    // of scope here is intentional.
+    // the C++ pointee dies, the contextDeallocator releases it. Reattaching the same
+    // native state to another runtime's JS object reuses that same C++ pointee.
     jsObject.setNativeState(nativeState)
-    nativeState.pairedWeakObject = jsObject.createWeak()
-    nativeObject.nativeState = nativeState
+
+    // The registry is scoped to its app context, so the JS object being paired here lives in that
+    // context's runtime. Record the pairing under that runtime so the native object can recover this
+    // JS counterpart via `native.nativeState?.javaScriptObject(in:)`.
+    if let runtime = try? appContext?.runtime {
+      nativeState.setJavaScriptObject(jsObject, in: runtime)
+    }
 
     return id
   }
@@ -207,10 +222,11 @@ public final class SharedObjectRegistry: Sendable {
   }
 
   /**
-   Gets the JS shared object that is paired with a given native object.
+   Gets the JS shared object that is paired with a given native object in this registry's runtime.
    */
   internal func toJavaScriptObject(_ nativeObject: SharedObject) -> JavaScriptObject? {
-    if let pairedObject = nativeObject.nativeState?.pairedWeakObject?.lock() {
+    if let runtime = try? appContext?.runtime,
+      let pairedObject = nativeObject.nativeState?.javaScriptObject(in: runtime) {
       return pairedObject
     }
     // Fallback to the id-based lookup for cases where the native object was registered
