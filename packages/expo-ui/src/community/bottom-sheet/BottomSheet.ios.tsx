@@ -247,7 +247,7 @@ export function BottomSheet(props: BottomSheetProps) {
                   style={
                     fitToContents
                       ? { paddingTop: handleComponent !== null ? 16 : 0 }
-                      : { flex: 1, paddingTop: handleComponent !== null ? 16 : 0 }
+                      : { flexGrow: 1, height: 0, paddingTop: handleComponent !== null ? 16 : 0 }
                   }>
                   <SheetScrollContextReset>{children}</SheetScrollContextReset>
                 </View>
