@@ -5,6 +5,7 @@ import { env } from '../env';
 import { FetchClient } from './clients/FetchClient';
 import { FetchDetachedClient } from './clients/FetchDetachedClient';
 import type { TelemetryClient, TelemetryClientStrategy, TelemetryRecord } from './types';
+import { createUndetectedAgentTelemetryContext, type AgentTelemetryContext } from './utils/agent';
 import { createContext } from './utils/context';
 
 const debug = require('debug')('expo:telemetry') as typeof console.log;
@@ -16,6 +17,8 @@ type TelemetryOptions = {
   sessionId?: string;
   /** The authenticated user ID, this is used to generate an untracable hash */
   userId?: string;
+  /** The coding agent detection result */
+  agent?: AgentTelemetryContext;
   /** The underlying telemetry strategy to use */
   strategy?: TelemetryClientStrategy;
 };
@@ -28,6 +31,8 @@ type TelemetryActor = Required<Pick<TelemetryOptions, 'anonymousId' | 'sessionId
    * If this value is set to a string, telemetry is considered initialized with an authenticated user.
    */
   userHash?: string | null;
+  /** The coding agent detection result */
+  agent?: AgentTelemetryContext;
 };
 
 export class Telemetry {
@@ -42,13 +47,14 @@ export class Telemetry {
     anonymousId = getAnonymousId(),
     sessionId = crypto.randomUUID(),
     userId,
+    agent,
     strategy = 'detached',
   }: TelemetryOptions = {}) {
-    this.actor = { anonymousId, sessionId };
+    this.actor = { anonymousId, sessionId, agent };
     this.setStrategy(env.EXPO_NO_TELEMETRY_DETACH ? 'debug' : strategy);
 
     if (userId) {
-      this.initialize({ userId });
+      this.initialize({ userId, agent: agent ?? createUndetectedAgentTelemetryContext() });
     }
   }
 
@@ -74,11 +80,18 @@ export class Telemetry {
   }
 
   get isInitialized() {
-    return this.actor.userHash !== undefined;
+    return this.actor.userHash !== undefined && this.actor.agent !== undefined;
   }
 
-  initialize({ userId }: { userId: string | null }) {
+  initialize({
+    userId,
+    agent = null,
+  }: {
+    userId: string | null;
+    agent?: AgentTelemetryContext | null;
+  }) {
     this.actor.userHash = userId ? hashUserId(userId) : null;
+    this.actor.agent = agent ?? createUndetectedAgentTelemetryContext();
     this.flushEarlyRecords();
   }
 
@@ -101,6 +114,7 @@ export class Telemetry {
         context: {
           ...this.context,
           sessionId: this.actor.sessionId,
+          agent: this.actor.agent ?? createUndetectedAgentTelemetryContext(),
           client: { mode: this.client.strategy },
         },
       }))

@@ -5,6 +5,10 @@ import { env } from '../env';
 import type { Telemetry } from './Telemetry';
 import { commandEvent } from './events';
 import type { TelemetryRecord } from './types';
+import {
+  createUndetectedAgentTelemetryContext,
+  getAgentTelemetryContextAsync,
+} from './utils/agent';
 
 /** The singleton telemetry manager to use */
 let telemetry: Telemetry | null = null;
@@ -23,9 +27,10 @@ export function getTelemetry(): Telemetry | null {
     process.once('beforeExit', () => telemetry?.flushOnExit());
 
     // Initialize the telemetry
-    getUserAsync()
-      .then((actor) => telemetry?.initialize({ userId: actor?.id ?? null }))
-      .catch(() => telemetry?.initialize({ userId: null }));
+    Promise.all([
+      getUserAsync().catch(() => null),
+      getAgentTelemetryContextAsync().catch(() => createUndetectedAgentTelemetryContext()),
+    ]).then(([actor, agent]) => telemetry?.initialize({ userId: actor?.id ?? null, agent }));
   }
 
   return telemetry;

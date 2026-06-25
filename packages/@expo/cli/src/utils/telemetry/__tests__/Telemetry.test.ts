@@ -25,6 +25,9 @@ it('waits until telemetry is initialized', () => {
   expect(client.record).toHaveBeenCalledWith([
     expect.objectContaining({
       userHash: null,
+      context: expect.objectContaining({
+        agent: { detected: false },
+      }),
     }),
   ]);
 });
@@ -47,6 +50,7 @@ it('preprocesses all records', () => {
       userHash: expect.any(String),
       context: expect.objectContaining({
         sessionId: expect.any(String),
+        agent: { detected: false },
       }),
     }),
   ]);
@@ -55,6 +59,37 @@ it('preprocesses all records', () => {
   expect(client.record).toHaveBeenCalledWith([
     expect.objectContaining({
       userHash: expect.not.stringMatching('yyy'),
+    }),
+  ]);
+});
+
+it('adds detected agent context to all records', () => {
+  const telemetry = new Telemetry({
+    anonymousId: 'xxx',
+    userId: 'yyy',
+    agent: {
+      detected: true,
+      id: 'codex',
+      name: 'Codex',
+      sessionId: 'zzz',
+      confidence: { level: 'high', score: 0.99, signals: 2 },
+    },
+  });
+  const client = mockTelemetryClient(telemetry);
+
+  telemetry.record(commandEvent('start'));
+
+  expect(client.record).toHaveBeenCalledWith([
+    expect.objectContaining({
+      context: expect.objectContaining({
+        agent: {
+          detected: true,
+          id: 'codex',
+          name: 'Codex',
+          sessionId: 'zzz',
+          confidence: { level: 'high', score: 0.99, signals: 2 },
+        },
+      }),
     }),
   ]);
 });
